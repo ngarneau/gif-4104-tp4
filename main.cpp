@@ -66,34 +66,42 @@ void invertParallel(Matrix& iA) {
    size_t global_size[2], local_size[2];
    int found;
    sclHard hardware;
-   sclSoft software;
+   sclSoft software, software2;
    int n = iA.rows();
 
    MatrixConcatCols lAI(iA, MatrixIdentity(iA.rows()));
 
-   int worksize = iA.rows()*iA.cols()*sizeof(double);
+   int worksize = lAI.rows()*lAI.cols()*sizeof(double);
+   int numberOfCols = lAI.cols();
 
    // Get the hardware
    hardware = sclGetCPUHardware( 0, &found );
 
    // Get the software
    software = sclGetCLSoftware( "example.cl", "findBiggest", hardware );
+   software2 = sclGetCLSoftware("normalize.cl", "normalisation", hardware);
 
    // Setting NDRanges
+   /*std::valarray<double> plainData2 = iA.getDataArray();
+   global_size[0] = iA.rows(); global_size[1] = iA.cols();
+   local_size[0] = 1; local_size[1] = 1;
+   double test = 0;
+   sclManageArgsLaunchKernel( hardware, software2, global_size, local_size,
+        "%R %R",
+        worksize, &plainData2[0], sizeof(double), &test, sizeof(double));
+   cout << test << '\n';*/
 
   for (size_t k=0; k < lAI.rows(); ++k) {
     
       int maximumIndexValue = 0;
-      std::valarray<double> plainData = iA.getDataArray();
-      global_size[0] = iA.rows()*iA.cols(); global_size[1] = 1;
-      local_size[0] = 1; local_size[1] = 1;
+      std::valarray<double> plainData = lAI.getDataArray();
+      global_size[0] = lAI.rows()*lAI.cols(); global_size[1] = 1;
+      local_size[0] = global_size[0]; local_size[1] = 1;
       int max = 0;
       
       sclManageArgsLaunchKernel( hardware, software, global_size, local_size,
-        "%R %R %R %R %R",
-        worksize, &plainData[0], sizeof(double), &maximumIndexValue, sizeof(int), &k, sizeof(int), &n, sizeof(int), &max, sizeof(int));
-
-      cout << maximumIndexValue << '\n';
+        "%r %R %r %r %R",
+        worksize, &plainData[0], sizeof(double), &maximumIndexValue, sizeof(int), &k, sizeof(int), &numberOfCols, sizeof(int), &max);
 
       if (maximumIndexValue != k) lAI.swapRows(maximumIndexValue, k);
 
@@ -101,6 +109,28 @@ void invertParallel(Matrix& iA) {
       for (size_t j=0; j<lAI.cols(); ++j) {
           lAI(k, j) /= lValue;
       }
+
+      //cout << "\nMatrice:\n" << lAI.str() << endl;
+
+      // here we pass in the whole matrix, with its extension
+      std::valarray<double> plainData2 = lAI.getDataArray();
+      global_size[0] = lAI.rows(); global_size[1] = lAI.cols();
+      local_size[0] = global_size[0]; local_size[1] = global_size[1];
+      int worksize2 = lAI.rows()*lAI.cols()*sizeof(double);
+      int nbrItems = lAI.rows()*lAI.cols();
+      double test = 0;
+      sclManageArgsLaunchKernel( hardware, software2, global_size, local_size,
+        "%R %R %r %r %r",
+        worksize2, &plainData2[0], sizeof(double), &test, sizeof(int), &k, sizeof(int), &n, sizeof(int), &nbrItems);
+
+      /*for (size_t i=0; i<lAI.rows(); ++i) {
+          if (i != k) { // ...différente de k
+              // On soustrait la rangée k
+              // multipliée par l'élément k de la rangée courante
+              double lValue = lAI(i, k);
+              lAI.getRowSlice(i) -= lAI.getRowCopy(k)*lValue;
+          }
+      }*/
   }
 
 
@@ -177,12 +207,13 @@ void invertParallel(Matrix& iA) {
         //cout << "\nMatrice parallele du processus " << myrank << "\n" << lAI.str() << endl;
     //}
     //MPI::COMM_WORLD.Barrier();
+    */
 
     // On copie la partie droite de la matrice AI ainsi transformée
     // dans la matrice courante (this).
     for (unsigned int i=0; i<iA.rows(); ++i) {
         iA.getRowSlice(i) = lAI.getDataArray()[slice(i*lAI.cols()+iA.cols(), iA.cols(), 1)];
-    }*/
+    }
 
 
 }
@@ -240,8 +271,9 @@ int main(int argc, char** argv) {
 
    // on créer la matrice parallèle
    mainMatrixParallel = lA;
-   cout << "Matrice inverse:\n" << mainMatrixParallel.str() << endl;
+   cout << "Matrice:\n" << mainMatrixParallel.str() << endl;
    invertParallel(mainMatrixParallel);
+   cout << "Matrice:\n" << mainMatrixParallel.str() << endl;
 
    //printf( "Elapsed time is %f\n", t2 - t1 );
    //cout << "\nMatrice inverse parallele:\n" << mainMatrixParallel.str() << endl;
